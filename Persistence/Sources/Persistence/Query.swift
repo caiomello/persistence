@@ -8,6 +8,10 @@
 import Foundation
 import CoreData
 
+public enum QueryError: Error {
+    case objectNotFound
+}
+
 public protocol Query {
     associatedtype ManagedObjectType: NSManagedObject
     var predicate: NSPredicate? { get }
@@ -27,8 +31,9 @@ public extension Query {
         try context.fetch(fetchRequest)
     }
 
-    func fetchFirst(context: NSManagedObjectContext) throws -> ManagedObjectType? {
-        try context.fetch(fetchRequest).first
+    func fetchFirst(context: NSManagedObjectContext) throws -> ManagedObjectType {
+        guard let first = try context.fetch(fetchRequest).first else { throw QueryError.objectNotFound }
+        return first
     }
 
     func count(context: NSManagedObjectContext) throws -> Int {
