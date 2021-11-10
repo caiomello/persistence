@@ -13,6 +13,11 @@ public enum PersistentStore {
         let name: String?
         let configuration: String?
 
+        init(name: String? = nil, configuration: String? = nil) {
+            self.name = name
+            self.configuration = configuration
+        }
+
         static var `default` = Settings(name: nil, configuration: nil)
     }
 
