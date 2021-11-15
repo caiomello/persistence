@@ -20,6 +20,10 @@ public protocol Query {
 }
 
 public extension Query {
+    var sortDescriptors: [NSSortDescriptor]? {
+        return nil
+    }
+
     var fetchRequest: NSFetchRequest<ManagedObjectType> {
         let request = NSFetchRequest<ManagedObjectType>(entityName: "\(ManagedObjectType.self)")
         request.predicate = predicate
