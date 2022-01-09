@@ -10,11 +10,19 @@ import CoreData
 import CloudKit
 import Combine
 
+/// An object responsible for initializing persistent stores and providing mechanisms for data fetching and manipulation.
 public final class PersistenceController {
     private let persistentContainer: NSPersistentContainer
 
+    /// Initializes persistent stores.
+    /// - Parameters:
+    ///   - model: The name of the managed object model.
+    ///   - cloudKitContainer: The CloudKit container to be used.
+    ///   - stores: The different stores to be initialized.
     public init(model: String, cloudKitContainer: String, stores: [PersistentStore]) {
         let container = NSPersistentCloudKitContainer(name: model)
+
+        let applicationSupportDirectoryURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
 
         let storeDescriptions: [NSPersistentStoreDescription] = stores.map { store in
             switch store {
@@ -23,18 +31,16 @@ public final class PersistenceController {
                 let inMemoryStoreDescription = NSPersistentStoreDescription(url: inMemoryStoreURL)
                 return inMemoryStoreDescription
 
-            case .local(let settings):
-                let localStoreName = settings.name ?? "local"
-                let localStoreURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.appendingPathComponent("\(localStoreName).sqlite")
+            case .local(let configuration, let fileName):
+                let localStoreURL = applicationSupportDirectoryURL.appendingPathComponent("\(fileName).sqlite")
 
                 let localStoreDescription = NSPersistentStoreDescription(url: localStoreURL)
-                localStoreDescription.configuration = settings.configuration
+                localStoreDescription.configuration = configuration
 
                 return localStoreDescription
 
-            case .private(let settings):
-                let privateStoreName = settings.name ?? "private"
-                let privateStoreURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.appendingPathComponent("\(privateStoreName).sqlite")
+            case .cloudPrivate(let configuration, let fileName):
+                let privateStoreURL = applicationSupportDirectoryURL.appendingPathComponent("\(fileName).sqlite")
 
                 let privateStoreDescription = NSPersistentStoreDescription(url: privateStoreURL)
 
@@ -42,13 +48,12 @@ public final class PersistenceController {
                 options.databaseScope = .private
 
                 privateStoreDescription.cloudKitContainerOptions = options
-                privateStoreDescription.configuration = settings.configuration
+                privateStoreDescription.configuration = configuration
 
                 return privateStoreDescription
 
-            case .shared(let settings):
-                let sharedStoreName = settings.name ?? "shared"
-                let sharedStoreURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.appendingPathComponent("\(sharedStoreName).sqlite")
+            case .cloudShared(let configuration, let fileName):
+                let sharedStoreURL = applicationSupportDirectoryURL.appendingPathComponent("\(fileName).sqlite")
 
                 let sharedStoreDescription = NSPersistentStoreDescription(url: sharedStoreURL)
 
@@ -56,7 +61,7 @@ public final class PersistenceController {
                 options.databaseScope = .shared
 
                 sharedStoreDescription.cloudKitContainerOptions = options
-                sharedStoreDescription.configuration = settings.configuration
+                sharedStoreDescription.configuration = configuration
 
                 return sharedStoreDescription
             }
@@ -64,7 +69,6 @@ public final class PersistenceController {
 
         container.persistentStoreDescriptions = storeDescriptions
 
-        // TODO: Update to async version when available.
         container.loadPersistentStores { description, error in
             if let error = error {
                 fatalError("Failed to load persistent store with description:\n\(description)\nError:\(error)")
