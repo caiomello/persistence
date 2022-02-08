@@ -89,14 +89,14 @@ extension PersistenceController {
         persistentContainer.viewContext
     }
 
-    public func performInForeground(_ block: @escaping (NSManagedObjectContext) throws -> Void) throws {
+    public func performInForeground<T>(_ block: @escaping (NSManagedObjectContext) throws -> T) throws -> T {
         try block(persistentContainer.viewContext)
     }
 
-    public func performInBackground(_ block: @escaping (NSManagedObjectContext) throws -> Void) async throws {
+    public func performInBackground<T>(_ block: @escaping (NSManagedObjectContext) throws -> T) async throws -> T {
         try await persistentContainer.performBackgroundTask { context in
             context.mergePolicy = NSMergePolicy(merge: .mergeByPropertyObjectTrumpMergePolicyType)
-            try block(context)
+            return try block(context)
         }
     }
 
