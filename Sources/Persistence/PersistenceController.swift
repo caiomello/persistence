@@ -111,7 +111,9 @@ extension PersistenceController {
 
 extension PersistenceController {
     public func publisher<T: NSManagedObject>(for managedObjectType: T.Type) -> AnyPublisher<Void, Never> {
-        savePublisher(for: managedObjectType).merge(with: mergePublisher(for: managedObjectType)).eraseToAnyPublisher()
+        savePublisher(for: managedObjectType)
+            .merge(with: mergePublisher(for: managedObjectType))
+            .eraseToAnyPublisher()
     }
 
     private func savePublisher<T: NSManagedObject>(for managedObjectType: T.Type) -> AnyPublisher<Void, Never> {
