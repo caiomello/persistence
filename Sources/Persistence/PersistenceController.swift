@@ -9,37 +9,42 @@ import Foundation
 import CoreData
 import CloudKit
 import Combine
+import OSLog
 
 /// An object responsible for initializing persistent stores and providing mechanisms for data fetching and manipulation.
 public final class PersistenceController {
+    static private let logger = Logger(subsystem: "Persistence", category: "PersistenceController")
+
     private let persistentContainer: NSPersistentContainer
 
     /// Initializes persistent stores.
     /// - Parameters:
-    ///   - model: The name of the managed object model.
-    ///   - cloudKitContainer: The CloudKit container to be used.
-    ///   - stores: The different stores to be initialized.
-    public init(model: String, cloudKitContainer: String, stores: [PersistentStore]) {
-        let container = NSPersistentCloudKitContainer(name: model)
+    ///   - modelName: The name of the managed object model.
+    ///   - stores: The individual stores to be initialized.
+    public init(modelName: String, stores: [PersistentStore]) throws {
+        let container = NSPersistentCloudKitContainer(name: modelName)
 
         let applicationSupportDirectoryURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
 
         let storeDescriptions: [NSPersistentStoreDescription] = stores.map { store in
             switch store {
-            case .inMemory:
+            case .inMemory(let modelConfiguration):
                 let inMemoryStoreURL = URL(fileURLWithPath: "/dev/null")
+
                 let inMemoryStoreDescription = NSPersistentStoreDescription(url: inMemoryStoreURL)
+                inMemoryStoreDescription.configuration = modelConfiguration
+
                 return inMemoryStoreDescription
 
-            case .local(let configuration, let fileName):
+            case .local(let modelConfiguration, let fileName):
                 let localStoreURL = applicationSupportDirectoryURL.appendingPathComponent("\(fileName).sqlite")
 
                 let localStoreDescription = NSPersistentStoreDescription(url: localStoreURL)
-                localStoreDescription.configuration = configuration
+                localStoreDescription.configuration = modelConfiguration
 
                 return localStoreDescription
 
-            case .cloudPrivate(let configuration, let fileName):
+            case .cloudPrivate(let modelConfiguration, let cloudKitContainer, let fileName):
                 let privateStoreURL = applicationSupportDirectoryURL.appendingPathComponent("\(fileName).sqlite")
 
                 let privateStoreDescription = NSPersistentStoreDescription(url: privateStoreURL)
@@ -48,11 +53,11 @@ public final class PersistenceController {
                 options.databaseScope = .private
 
                 privateStoreDescription.cloudKitContainerOptions = options
-                privateStoreDescription.configuration = configuration
+                privateStoreDescription.configuration = modelConfiguration
 
                 return privateStoreDescription
 
-            case .cloudShared(let configuration, let fileName):
+            case .cloudShared(let modelConfiguration, let cloudKitContainer, let fileName):
                 let sharedStoreURL = applicationSupportDirectoryURL.appendingPathComponent("\(fileName).sqlite")
 
                 let sharedStoreDescription = NSPersistentStoreDescription(url: sharedStoreURL)
@@ -61,7 +66,7 @@ public final class PersistenceController {
                 options.databaseScope = .shared
 
                 sharedStoreDescription.cloudKitContainerOptions = options
-                sharedStoreDescription.configuration = configuration
+                sharedStoreDescription.configuration = modelConfiguration
 
                 return sharedStoreDescription
             }
@@ -69,10 +74,19 @@ public final class PersistenceController {
 
         container.persistentStoreDescriptions = storeDescriptions
 
+        var loadError: Error?
+
         container.loadPersistentStores { description, error in
             if let error = error {
-                fatalError("Failed to load persistent store with description:\n\(description)\nError:\(error)")
+                Self.logger.error("Failed to load persistent store with description:\n\(description)\nError:\(error) - \(error)")
+                loadError = error
+            } else {
+                Self.logger.notice("Persistent store loaded with description: \(description)")
             }
+        }
+
+        if let loadError {
+            throw loadError
         }
 
         container.viewContext.automaticallyMergesChangesFromParent = true
@@ -97,12 +111,6 @@ extension PersistenceController {
         try await persistentContainer.performBackgroundTask { context in
             context.mergePolicy = NSMergePolicy(merge: .mergeByPropertyObjectTrumpMergePolicyType)
             return try block(context)
-        }
-    }
-
-    public func save(_ context: NSManagedObjectContext) throws {
-        if context.hasChanges {
-            try context.save()
         }
     }
 }
