@@ -12,7 +12,7 @@ import Combine
 import OSLog
 
 /// An object responsible for initializing persistent stores and providing mechanisms for data fetching and manipulation.
-public final class PersistenceController {
+public final class PersistenceController: @unchecked Sendable {
     static private let logger = Logger(subsystem: "Persistence", category: "PersistenceController")
 
     private let persistentContainer: NSPersistentContainer
@@ -107,7 +107,7 @@ extension PersistenceController {
         try block(persistentContainer.viewContext)
     }
 
-    public func performInBackground<T>(_ block: @escaping (NSManagedObjectContext) throws -> T) async throws -> T {
+    public func performInBackground<T: Sendable>(_ block: @escaping @Sendable (NSManagedObjectContext) throws -> T) async throws -> T {
         try await persistentContainer.performBackgroundTask { context in
             context.mergePolicy = NSMergePolicy(merge: .mergeByPropertyObjectTrumpMergePolicyType)
             return try block(context)
