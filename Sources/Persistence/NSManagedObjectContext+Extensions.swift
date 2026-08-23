@@ -12,13 +12,14 @@ import OSLog
 private let logger = Logger(subsystem: "Persistence", category: "NSManagedObjectContext")
 
 public extension NSManagedObjectContext {
-    func saveIfNeeded() {
+    func saveIfNeeded() throws {
         guard hasChanges else { return }
 
         do {
             try save()
         } catch {
             logger.error("Failed to save context: \(error)")
+            throw error
         }
     }
 }
