@@ -8,7 +8,6 @@
 import Foundation
 import CoreData
 import CloudKit
-import Combine
 import OSLog
 
 /// An object responsible for initializing persistent stores and providing mechanisms for data fetching and manipulation.
@@ -124,29 +123,26 @@ extension PersistenceController {
         let context = foregroundContext
 
         return AsyncStream { continuation in
-            nonisolated(unsafe) let observers = [
+            let tasks = [
                 NSManagedObjectContext.didSaveObjectIDsNotification,
                 NSManagedObjectContext.didMergeChangesObjectIDsNotification
             ].map { name in
-                NotificationCenter.default.addObserver(forName: name, object: context, queue: .main) { notification in
-                    guard self.containsChanges(to: T.self, notification: notification, context: context) else { return }
-                    continuation.yield()
+                Task { @MainActor in
+                    for await notification in NotificationCenter.default.notifications(named: name, object: context) {
+                        let updated = notification.userInfo?[NSUpdatedObjectIDsKey] as? Set<NSManagedObjectID> ?? []
+                        let inserted = notification.userInfo?[NSInsertedObjectIDsKey] as? Set<NSManagedObjectID> ?? []
+                        let deleted = notification.userInfo?[NSDeletedObjectIDsKey] as? Set<NSManagedObjectID> ?? []
+
+                        let changedIDs = updated.union(inserted).union(deleted)
+
+                        guard changedIDs.contains(where: { context.object(with: $0) is T }) else { continue }
+
+                        continuation.yield()
+                    }
                 }
             }
 
-            continuation.onTermination = { _ in
-                observers.forEach(NotificationCenter.default.removeObserver)
-            }
+            continuation.onTermination = { _ in tasks.forEach { $0.cancel() } }
         }
-    }
-
-    private func containsChanges<T: NSManagedObject>(to type: T.Type, notification: Notification, context: NSManagedObjectContext) -> Bool {
-        let updated = notification.userInfo?[NSUpdatedObjectIDsKey] as? Set<NSManagedObjectID> ?? []
-        let inserted = notification.userInfo?[NSInsertedObjectIDsKey] as? Set<NSManagedObjectID> ?? []
-        let deleted = notification.userInfo?[NSDeletedObjectIDsKey] as? Set<NSManagedObjectID> ?? []
-
-        let changedIDs = updated.union(inserted).union(deleted)
-
-        return changedIDs.contains { context.object(with: $0) is T }
     }
 }
