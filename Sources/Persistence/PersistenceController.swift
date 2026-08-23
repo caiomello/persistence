@@ -118,25 +118,29 @@ extension PersistenceController {
 // MARK: - Change tracking
 
 extension PersistenceController {
-    public func publisher<T: NSManagedObject>(for managedObjectType: T.Type) -> AnyPublisher<Void, Never> {
-        savePublisher(for: managedObjectType)
-            .merge(with: mergePublisher(for: managedObjectType))
-            .eraseToAnyPublisher()
+    /// Emits once whenever objects of the given type are saved into, or merged into, the foreground context.
+    @MainActor
+    public func changes<T: NSManagedObject>(for managedObjectType: T.Type) -> AsyncStream<Void> {
+        let context = foregroundContext
+
+        return AsyncStream { continuation in
+            nonisolated(unsafe) let observers = [
+                NSManagedObjectContext.didSaveObjectIDsNotification,
+                NSManagedObjectContext.didMergeChangesObjectIDsNotification
+            ].map { name in
+                NotificationCenter.default.addObserver(forName: name, object: context, queue: .main) { notification in
+                    guard self.containsChanges(to: T.self, notification: notification, context: context) else { return }
+                    continuation.yield()
+                }
+            }
+
+            continuation.onTermination = { _ in
+                observers.forEach(NotificationCenter.default.removeObserver)
+            }
+        }
     }
 
-    private func savePublisher<T: NSManagedObject>(for managedObjectType: T.Type) -> AnyPublisher<Void, Never> {
-        NotificationCenter.default.publisher(for: NSManagedObjectContext.didSaveObjectIDsNotification, object: persistentContainer.viewContext)
-            .compactMap { self.containsChanges(to: T.self, notification: $0, context: self.persistentContainer.viewContext) ? () : nil }
-            .eraseToAnyPublisher()
-    }
-
-    private func mergePublisher<T: NSManagedObject>(for managedObjectType: T.Type) -> AnyPublisher<Void, Never> {
-        NotificationCenter.default.publisher(for: NSManagedObjectContext.didMergeChangesObjectIDsNotification, object: persistentContainer.viewContext)
-            .compactMap { self.containsChanges(to: T.self, notification: $0, context: self.persistentContainer.viewContext) ? () : nil }
-            .eraseToAnyPublisher()
-    }
-
-    private func containsChanges<T: NSManagedObject>(to type: T.Type, notification: NotificationCenter.Publisher.Output, context: NSManagedObjectContext) -> Bool {
+    private func containsChanges<T: NSManagedObject>(to type: T.Type, notification: Notification, context: NSManagedObjectContext) -> Bool {
         let updated = notification.userInfo?[NSUpdatedObjectIDsKey] as? Set<NSManagedObjectID> ?? []
         let inserted = notification.userInfo?[NSInsertedObjectIDsKey] as? Set<NSManagedObjectID> ?? []
         let deleted = notification.userInfo?[NSDeletedObjectIDsKey] as? Set<NSManagedObjectID> ?? []
