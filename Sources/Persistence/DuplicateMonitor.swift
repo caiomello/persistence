@@ -1,5 +1,5 @@
 //
-//  DuplicateMergingWorker.swift
+//  DuplicateMonitor.swift
 //  Persistence
 //
 //  Created by Caio Mello on 17.10.26.
@@ -9,11 +9,11 @@ import Foundation
 import CoreData
 import OSLog
 
-final class DuplicateMergingWorker: Sendable {
+final class DuplicateMonitor: Sendable {
     private let persistenceController: PersistenceController
     private let syncedManagedObjects: [any SyncedManagedObject.Type]
 
-    private let logger = Logger(subsystem: "Persistence", category: "DuplicateMergingWorker")
+    private let logger = Logger(subsystem: "Persistence", category: "DuplicateMonitor")
 
     init(persistenceController: PersistenceController, syncedManagedObjects: [any SyncedManagedObject.Type]) {
         self.persistenceController = persistenceController
@@ -21,7 +21,7 @@ final class DuplicateMergingWorker: Sendable {
     }
 
     func start() {
-        let (triggers, continuation) = AsyncStream.makeStream(of: Void.self, bufferingPolicy: .bufferingNewest(1))
+        let (pendingRuns, continuation) = AsyncStream.makeStream(of: Void.self, bufferingPolicy: .bufferingNewest(1))
 
         for managedObjectType in syncedManagedObjects {
             Task.detached {
@@ -32,8 +32,15 @@ final class DuplicateMergingWorker: Sendable {
         }
 
         Task.detached {
-            for await _ in triggers {
-                await self.run()
+            for await _ in pendingRuns {
+                for managedObjectType in self.syncedManagedObjects {
+                    do {
+                        try await self.mergeDuplicates(of: managedObjectType)
+                    } catch {
+                        self.logger.error("Failed to merge duplicates of \(managedObjectType): \(error)")
+                        break
+                    }
+                }
             }
         }
     }
@@ -41,18 +48,7 @@ final class DuplicateMergingWorker: Sendable {
 
 // MARK: - Merging
 
-extension DuplicateMergingWorker {
-    private func run() async {
-        for managedObjectType in syncedManagedObjects {
-            do {
-                try await mergeDuplicates(of: managedObjectType)
-            } catch {
-                logger.error("Failed to merge duplicates of \(managedObjectType): \(error)")
-                return
-            }
-        }
-    }
-
+extension DuplicateMonitor {
     private func mergeDuplicates<T: SyncedManagedObject>(of managedObjectType: T.Type) async throws {
         try await persistenceController.performInBackground { context in
             try self.mergeDuplicates(of: managedObjectType, in: context)
@@ -65,15 +61,15 @@ extension DuplicateMergingWorker {
         var survivors: [T] = []
 
         for copies in copiesByID.values {
-            let keyedCopies = copies.compactMap { copy in copy.uuid.map { (uuid: $0, copy: copy) } }
+            let copiesWithUUID = copies.compactMap { copy in copy.uuid.map { (uuid: $0, copy: copy) } }
 
-            guard keyedCopies.count == copies.count else { continue }
+            guard copiesWithUUID.count == copies.count else { continue }
 
-            let orderedCopies = keyedCopies.sorted { $0.uuid < $1.uuid }.map(\.copy)
+            let copiesInUUIDOrder = copiesWithUUID.sorted { $0.uuid < $1.uuid }.map(\.copy)
 
-            guard let survivor = orderedCopies.first else { continue }
+            guard let survivor = copiesInUUIDOrder.first else { continue }
 
-            let losers = orderedCopies.dropFirst()
+            let losers = copiesInUUIDOrder.dropFirst()
 
             for loser in losers {
                 survivor.merge(loser)
@@ -100,17 +96,17 @@ extension DuplicateMergingWorker {
     }
 
     private func duplicates<T: SyncedManagedObject>(of managedObjectType: T.Type, in context: NSManagedObjectContext) throws -> [T] {
-        let count = NSExpressionDescription()
-        count.name = "count"
-        count.expression = NSExpression(forFunction: "count:", arguments: [NSExpression(forKeyPath: "id")])
-        count.expressionResultType = .integer64AttributeType
+        let copyCount = NSExpressionDescription()
+        copyCount.name = "copyCount"
+        copyCount.expression = NSExpression(forFunction: "count:", arguments: [NSExpression(forKeyPath: "id")])
+        copyCount.expressionResultType = .integer64AttributeType
 
         let repeatedIDsRequest = NSFetchRequest<NSDictionary>()
         repeatedIDsRequest.entity = managedObjectType.entity()
         repeatedIDsRequest.resultType = .dictionaryResultType
-        repeatedIDsRequest.propertiesToFetch = ["id", count]
+        repeatedIDsRequest.propertiesToFetch = ["id", copyCount]
         repeatedIDsRequest.propertiesToGroupBy = ["id"]
-        repeatedIDsRequest.havingPredicate = NSPredicate(format: "%@ > 1", NSExpression(forVariable: "count"))
+        repeatedIDsRequest.havingPredicate = NSPredicate(format: "%@ > 1", NSExpression(forVariable: "copyCount"))
 
         let repeatedIDs = try context.fetch(repeatedIDsRequest).compactMap { $0["id"] }
 

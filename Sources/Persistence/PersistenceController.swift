@@ -127,7 +127,7 @@ public final class PersistenceController: @unchecked Sendable {
         self.persistentContainer = container
 
         if syncedManagedObjects.isEmpty == false {
-            DuplicateMergingWorker(persistenceController: self, syncedManagedObjects: syncedManagedObjects).start()
+            DuplicateMonitor(persistenceController: self, syncedManagedObjects: syncedManagedObjects).start()
         }
     }
 }
