@@ -25,6 +25,39 @@ final class OtherEntity: NSManagedObject {
     @NSManaged var id: String
 }
 
+/// Listed in `syncedManagedObjects:`. `merge(_:)` and `didMergeDuplicates(_:in:)` record what they
+/// received in stored attributes, so the tests can read it back from the store.
+@objc(SyncedEntity)
+final class SyncedEntity: NSManagedObject, SyncedManagedObject {
+    @NSManaged var id: String
+    @NSManaged var uuid: UUID?
+    @NSManaged var mergedUUIDs: String
+    @NSManaged var copiesWhenMerged: Int64
+
+    func merge(_ duplicate: SyncedEntity) {
+        mergedUUIDs = [mergedUUIDs, duplicate.uuid?.uuidString ?? ""]
+            .filter { $0.isEmpty == false }
+            .joined(separator: ",")
+    }
+
+    static func didMergeDuplicates(_ survivors: [SyncedEntity], in context: NSManagedObjectContext) throws {
+        for survivor in survivors {
+            let request = NSFetchRequest<SyncedEntity>(entityName: "SyncedEntity")
+            request.predicate = NSPredicate(format: "id == %@", survivor.id)
+            survivor.copiesWhenMerged = Int64(try context.count(for: request))
+        }
+    }
+}
+
+/// Conforms to `SyncedManagedObject` but is never listed in `syncedManagedObjects:`.
+@objc(UnlistedSyncedEntity)
+final class UnlistedSyncedEntity: NSManagedObject, SyncedManagedObject {
+    @NSManaged var id: String
+    @NSManaged var uuid: UUID?
+
+    func merge(_ duplicate: UnlistedSyncedEntity) {}
+}
+
 enum TestModel {
     static let configurationName = "Test"
 
@@ -75,19 +108,66 @@ enum TestModel {
 
         other.properties = [otherID]
 
+        let synced = NSEntityDescription()
+        synced.name = "SyncedEntity"
+        synced.managedObjectClassName = "SyncedEntity"
+
+        let syncedID = NSAttributeDescription()
+        syncedID.name = "id"
+        syncedID.attributeType = .stringAttributeType
+        syncedID.isOptional = false
+
+        let syncedUUID = NSAttributeDescription()
+        syncedUUID.name = "uuid"
+        syncedUUID.attributeType = .UUIDAttributeType
+        syncedUUID.isOptional = true
+
+        let mergedUUIDs = NSAttributeDescription()
+        mergedUUIDs.name = "mergedUUIDs"
+        mergedUUIDs.attributeType = .stringAttributeType
+        mergedUUIDs.isOptional = false
+        mergedUUIDs.defaultValue = ""
+
+        let copiesWhenMerged = NSAttributeDescription()
+        copiesWhenMerged.name = "copiesWhenMerged"
+        copiesWhenMerged.attributeType = .integer64AttributeType
+        copiesWhenMerged.isOptional = false
+        copiesWhenMerged.defaultValue = 0
+
+        synced.properties = [syncedID, syncedUUID, mergedUUIDs, copiesWhenMerged]
+
+        let unlisted = NSEntityDescription()
+        unlisted.name = "UnlistedSyncedEntity"
+        unlisted.managedObjectClassName = "UnlistedSyncedEntity"
+
+        let unlistedID = NSAttributeDescription()
+        unlistedID.name = "id"
+        unlistedID.attributeType = .stringAttributeType
+        unlistedID.isOptional = false
+
+        let unlistedUUID = NSAttributeDescription()
+        unlistedUUID.name = "uuid"
+        unlistedUUID.attributeType = .UUIDAttributeType
+        unlistedUUID.isOptional = true
+
+        unlisted.properties = [unlistedID, unlistedUUID]
+
+        let entities = [entity, other, synced, unlisted]
+
         let model = NSManagedObjectModel()
-        model.entities = [entity, other]
-        model.setEntities([entity, other], forConfigurationName: configurationName)
+        model.entities = entities
+        model.setEntities(entities, forConfigurationName: configurationName)
 
         return model
     }
 
     /// A controller backed by the shared model and a fresh in-memory store.
-    static func makeController() throws -> PersistenceController {
+    static func makeController(syncedManagedObjects: [any SyncedManagedObject.Type] = []) throws -> PersistenceController {
         try PersistenceController(
             modelName: "Test",
             managedObjectModel: model,
-            stores: [.inMemory(modelConfiguration: configurationName)]
+            stores: [.inMemory(modelConfiguration: configurationName)],
+            syncedManagedObjects: syncedManagedObjects
         )
     }
 
