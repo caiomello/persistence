@@ -7,24 +7,6 @@ import CoreData
 import Foundation
 @testable import Persistence
 
-/// A managed object used only by the tests.
-///
-/// `@objc(TestEntity)` keeps the Objective-C class name unqualified, so it matches the entity
-/// name `Query` derives from the Swift type.
-@objc(TestEntity)
-final class TestEntity: NSManagedObject {
-    @NSManaged var id: String
-    @NSManaged var name: String
-    @NSManaged var sortIndex: Int64
-}
-
-/// A second type, so the tests can prove `changes(for:)` filters by entity rather than firing
-/// on any save at all.
-@objc(OtherEntity)
-final class OtherEntity: NSManagedObject {
-    @NSManaged var id: String
-}
-
 enum TestModel {
     static let configurationName = "Test"
 
@@ -75,19 +57,66 @@ enum TestModel {
 
         other.properties = [otherID]
 
+        let synced = NSEntityDescription()
+        synced.name = "SyncedEntity"
+        synced.managedObjectClassName = "SyncedEntity"
+
+        let syncedID = NSAttributeDescription()
+        syncedID.name = "id"
+        syncedID.attributeType = .stringAttributeType
+        syncedID.isOptional = false
+
+        let syncedUUID = NSAttributeDescription()
+        syncedUUID.name = "uuid"
+        syncedUUID.attributeType = .UUIDAttributeType
+        syncedUUID.isOptional = true
+
+        let mergedUUIDs = NSAttributeDescription()
+        mergedUUIDs.name = "mergedUUIDs"
+        mergedUUIDs.attributeType = .stringAttributeType
+        mergedUUIDs.isOptional = false
+        mergedUUIDs.defaultValue = ""
+
+        let copiesWhenMerged = NSAttributeDescription()
+        copiesWhenMerged.name = "copiesWhenMerged"
+        copiesWhenMerged.attributeType = .integer64AttributeType
+        copiesWhenMerged.isOptional = false
+        copiesWhenMerged.defaultValue = 0
+
+        synced.properties = [syncedID, syncedUUID, mergedUUIDs, copiesWhenMerged]
+
+        let unlisted = NSEntityDescription()
+        unlisted.name = "UnlistedSyncedEntity"
+        unlisted.managedObjectClassName = "UnlistedSyncedEntity"
+
+        let unlistedID = NSAttributeDescription()
+        unlistedID.name = "id"
+        unlistedID.attributeType = .stringAttributeType
+        unlistedID.isOptional = false
+
+        let unlistedUUID = NSAttributeDescription()
+        unlistedUUID.name = "uuid"
+        unlistedUUID.attributeType = .UUIDAttributeType
+        unlistedUUID.isOptional = true
+
+        unlisted.properties = [unlistedID, unlistedUUID]
+
+        let entities = [entity, other, synced, unlisted]
+
         let model = NSManagedObjectModel()
-        model.entities = [entity, other]
-        model.setEntities([entity, other], forConfigurationName: configurationName)
+        model.entities = entities
+        model.setEntities(entities, forConfigurationName: configurationName)
 
         return model
     }
 
     /// A controller backed by the shared model and a fresh in-memory store.
-    static func makeController() throws -> PersistenceController {
+    static func makeController(syncedManagedObjects: [any SyncedManagedObject.Type] = []) throws -> PersistenceController {
         try PersistenceController(
             modelName: "Test",
             managedObjectModel: model,
-            stores: [.inMemory(modelConfiguration: configurationName)]
+            stores: [.inMemory(modelConfiguration: configurationName)],
+            syncedManagedObjects: syncedManagedObjects
         )
     }
 
