@@ -136,7 +136,6 @@ extension PersistenceController {
 
 extension PersistenceController {
     /// Emits once whenever objects of the given type are saved into, or merged into, the foreground context.
-    @MainActor
     public func changes<T: NSManagedObject>(for managedObjectType: T.Type) -> AsyncStream<Void> {
         let entityName = managedObjectType.entity().name
 
@@ -145,7 +144,7 @@ extension PersistenceController {
                 NSManagedObjectContext.didSaveObjectIDsNotification,
                 NSManagedObjectContext.didMergeChangesObjectIDsNotification
             ].map { name in
-                Task { @MainActor in
+                Task {
                     for await notification in NotificationCenter.default.notifications(named: name, object: foregroundContext) {
                         let updated = notification.userInfo?[NSUpdatedObjectIDsKey] as? Set<NSManagedObjectID> ?? []
                         let inserted = notification.userInfo?[NSInsertedObjectIDsKey] as? Set<NSManagedObjectID> ?? []
