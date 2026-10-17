@@ -82,8 +82,6 @@ extension DuplicateMonitor {
             survivors.append(survivor)
         }
 
-        guard survivors.isEmpty == false else { return }
-
         context.processPendingChanges()
 
         do {
