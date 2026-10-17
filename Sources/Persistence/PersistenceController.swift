@@ -25,7 +25,12 @@ public final class PersistenceController: @unchecked Sendable {
     /// - Parameters:
     ///   - modelName: The name of the managed object model.
     ///   - stores: The individual stores to be initialized.
-    public convenience init(modelName: String, stores: [PersistentStore]) throws {
+    ///   - syncedManagedObjects: The entity types whose duplicate copies are merged, in the order they are merged.
+    public convenience init(
+        modelName: String,
+        stores: [PersistentStore],
+        syncedManagedObjects: [any SyncedManagedObject.Type] = []
+    ) throws {
         let model = NSPersistentCloudKitContainer(name: modelName).managedObjectModel
 
         guard model.entities.isEmpty == false else {
@@ -33,12 +38,22 @@ public final class PersistenceController: @unchecked Sendable {
             throw PersistenceError.modelNotFound(name: modelName)
         }
 
-        try self.init(modelName: modelName, managedObjectModel: model, stores: stores)
+        try self.init(
+            modelName: modelName,
+            managedObjectModel: model,
+            stores: stores,
+            syncedManagedObjects: syncedManagedObjects
+        )
     }
 
     /// Initializes persistent stores against a model supplied directly, bypassing the lookup by
     /// name. Internal: this exists so the tests can run against a model built in code.
-    init(modelName: String, managedObjectModel: NSManagedObjectModel, stores: [PersistentStore]) throws {
+    init(
+        modelName: String,
+        managedObjectModel: NSManagedObjectModel,
+        stores: [PersistentStore],
+        syncedManagedObjects: [any SyncedManagedObject.Type] = []
+    ) throws {
         let container = NSPersistentCloudKitContainer(name: modelName, managedObjectModel: managedObjectModel)
 
         let applicationSupportDirectoryURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -110,6 +125,10 @@ public final class PersistenceController: @unchecked Sendable {
         container.viewContext.mergePolicy = NSMergePolicy(merge: .mergeByPropertyObjectTrumpMergePolicyType)
 
         self.persistentContainer = container
+
+        if syncedManagedObjects.isEmpty == false {
+            DuplicateMergingWorker(persistenceController: self, syncedManagedObjects: syncedManagedObjects).start()
+        }
     }
 }
 
