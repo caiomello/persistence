@@ -9,6 +9,11 @@ import Foundation
 import CoreData
 import OSLog
 
+/// Merges duplicate copies of the listed types whenever any of them changes.
+///
+/// A run merges every listed type, one at a time, in list order. Changes that arrive during a run
+/// collapse into a single follow-up run. A failure stops the run until the next change. The monitor
+/// holds the controller strongly and runs for the life of the process.
 final class DuplicateMonitor: Sendable {
     private let persistenceController: PersistenceController
     private let syncedManagedObjects: [any SyncedManagedObject.Type]
@@ -20,6 +25,7 @@ final class DuplicateMonitor: Sendable {
         self.syncedManagedObjects = syncedManagedObjects
     }
 
+    /// Starts observing changes to the listed types. Call once.
     func start() {
         let (pendingRuns, continuation) = AsyncStream.makeStream(of: Void.self, bufferingPolicy: .bufferingNewest(1))
 
@@ -49,12 +55,15 @@ final class DuplicateMonitor: Sendable {
 // MARK: - Merging
 
 extension DuplicateMonitor {
+    /// Merges the duplicates of one type in a background context.
     private func mergeDuplicates<T: SyncedManagedObject>(of managedObjectType: T.Type) async throws {
         try await persistenceController.performInBackground { context in
             try self.mergeDuplicates(of: managedObjectType, in: context)
         }
     }
 
+    /// Keeps the copy with the lowest `uuid` for each repeated id, merges the others into it in
+    /// `uuid` order, deletes them, calls `didMergeDuplicates(_:in:)`, and saves.
     private func mergeDuplicates<T: SyncedManagedObject>(of managedObjectType: T.Type, in context: NSManagedObjectContext) throws {
         let copiesByID = Dictionary(grouping: try duplicates(of: managedObjectType, in: context), by: \.id)
 
@@ -93,6 +102,8 @@ extension DuplicateMonitor {
         try context.saveIfNeeded()
     }
 
+    /// Every row whose `id` appears more than once, found with a grouped fetch so unique rows are
+    /// never loaded. Rows with no `id` are never returned.
     private func duplicates<T: SyncedManagedObject>(of managedObjectType: T.Type, in context: NSManagedObjectContext) throws -> [T] {
         let copyCount = NSExpressionDescription()
         copyCount.name = "copyCount"
